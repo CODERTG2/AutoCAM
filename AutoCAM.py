@@ -14,19 +14,23 @@ def run(_context: str):
 
     try:
         doc = app.activeDocument
-        design = adsk.fusion.Design.cast(doc.products.itemByProductType('DesignProductType'))
         cam = adsk.cam.CAM.cast(doc.products.itemByProductType('CAMProductType'))
-        # ui.messageBox(f'"{doc.name}" is the active Document.')
 
         if not cam:
             ui.messageBox('Switch to the Manufacture workspace or open a file with CAM data.')
             return
 
+        app.log(f"CAM created!")
+
         setups = cam.setups
         setupInput = setups.createInput(adsk.cam.OperationTypes.MillingOperation)
         newSetup = setups.add(setupInput)
 
+        app.log(f"Setup created!")
+
         newSetup.stockMode = 1
+
+        app.log(f"Stock mode set!")
 
         # get_params(newSetup)
 
@@ -36,7 +40,7 @@ def run(_context: str):
         params.itemByName('job_stockOffsetTop').expression = '0 in'
         params.itemByName('job_stockOffsetBottom').expression = '0 in'
 
-        ui.messageBox(f"Stock created!")
+        app.log(f"Stock created!")
 
         params.itemByName('wcs_orientation_mode').expression = "'axesZX'"
         params.itemByName('wcs_orientation_axesZX_unselected_default').expression = "'model'"
@@ -44,7 +48,7 @@ def run(_context: str):
         params.itemByName('wcs_origin_mode').expression = "'stockPoint'"
         params.itemByName('wcs_origin_boxPoint').expression = "'bottom 1'"
 
-        ui.messageBox(f"Origin created!")
+        app.log(f"Origin created!")
 
     except:  #pylint:disable=bare-except
         # Write the error message to the TEXT COMMANDS window.
@@ -61,4 +65,4 @@ def get_params(setup):
         param_names.append(param.name)
 
     param_names.sort()
-    ui.messageBox('\n'.join(param_names))
+    app.log('\n'.join(param_names))
