@@ -9,11 +9,11 @@ import adsk.cam
 app = adsk.core.Application.get()
 ui  = app.userInterface
 
-FEED_RATE = '100 mm/min'        # Cutting feed
-SPINDLE_SPEED = '1000 rpm'      # RPM
-PECK_DEPTH = '5 mm'             # Pecking depth for chip breaking
-FINAL_DEPTH = '20 mm'           # How deep to bore
-RETRACT_DISTANCE = '5 mm'       
+COOLANT = "''"
+BOTTOM_HEIGHT = ''
+DEPTH_PASSES = 0.0
+SPINDLE_SPEED = ''
+FEED_PLUNGE = ''
 
 def run(_context: str):
     """This function is called by Fusion when the script is run."""
@@ -21,6 +21,7 @@ def run(_context: str):
     try:
         doc = app.activeDocument
         cam = adsk.cam.CAM.cast(doc.products.itemByProductType('CAMProductType'))
+        design = adsk.fusion.Design.cast(doc.products.itemByProductType('DesignProductType'))
 
         if not cam:
             ui.messageBox('Switch to the Manufacture workspace or open a file with CAM data.')
@@ -56,7 +57,49 @@ def run(_context: str):
 
         app.log(f"Origin created!")
 
-        bore(doc, newSetup, cam)
+        # Calculate Stock Z Height from Model Bounding Box
+        rootComp = design.rootComponent
+        minZ = float('inf')
+        maxZ = float('-inf')
+        
+        # Check if there are bodies
+        if rootComp.bRepBodies.count == 0:
+             ui.messageBox('No bodies found in root component.')
+             return
+
+        for body in rootComp.bRepBodies:
+            bbox = body.boundingBox
+            if bbox.minPoint.z < minZ: minZ = bbox.minPoint.z
+            if bbox.maxPoint.z > maxZ: maxZ = bbox.maxPoint.z
+        
+        stock_z_height_cm = maxZ - minZ
+        
+        # User defined settings
+        (material, cancelled) = ui.inputBox("Is this polycarb or aluminum?", "Material", "polycarb")
+        if cancelled: return
+
+        COOLANT = "'disabled'"
+        BOTTOM_HEIGHT = '-0.01 in'
+        DEPTH_PASSES = f"{stock_z_height_cm / 5.0} in"
+        if material.lower() == "polycarb":
+            SPINDLE_SPEED = '16000 rpm'
+            FEED_PLUNGE = '8.33 in/min'
+        elif material.lower() == "aluminum":
+            SPINDLE_SPEED = '20000 rpm'
+            FEED_PLUNGE = '6 in/min'
+        else:
+            ui.messageBox('Invalid material selected.')
+            return
+        
+        config = {
+            'SPINDLE_SPEED': SPINDLE_SPEED,
+            'FEED_PLUNGE': FEED_PLUNGE,
+            'COOLANT': COOLANT,
+            'BOTTOM_HEIGHT': BOTTOM_HEIGHT,
+            'DEPTH_PASSES': DEPTH_PASSES
+        }
+
+        bore(doc, newSetup, cam, config)
 
         app.log(f"Bore created!")
 
@@ -70,7 +113,7 @@ def run(_context: str):
         else:
             app.log("Error: 'manualType' parameter not found.")
         
-        contour(doc, newSetup, cam)
+        contour(doc, newSetup, cam, config)
 
     except:  #pylint:disable=bare-except
         # Write the error message to the TEXT COMMANDS window.
@@ -89,7 +132,7 @@ def get_params(setup):
     param_names.sort()
     app.log('\n'.join(param_names))
 
-def bore(doc, setup, cam):
+def bore(doc, setup, cam, config):
     """Detect holes in the active design for boring operations."""
     design = adsk.fusion.Design.cast(doc.products.itemByProductType('DesignProductType'))
 
@@ -142,10 +185,10 @@ def bore(doc, setup, cam):
     params.itemByName('tool_numberOfFlutes').expression = '2'
 
     # Set other machining parameters
-    params.itemByName('tool_spindleSpeed').expression = '16000 rpm'
-    params.itemByName('tool_feedPlunge').expression = '8.33 in/min'
-    params.itemByName('tool_coolant').expression = "'disabled'"
-    params.itemByName('bottomHeight_offset').expression = '-0.01 in'
+    params.itemByName('tool_spindleSpeed').expression = config['SPINDLE_SPEED']
+    params.itemByName('tool_feedPlunge').expression = config['FEED_PLUNGE']
+    params.itemByName('tool_coolant').expression = config['COOLANT']
+    params.itemByName('bottomHeight_offset').expression = config['BOTTOM_HEIGHT']
     params.itemByName('strategy').expression = "'bore'"
 
     cam.generateToolpath(boring_op)
@@ -172,7 +215,7 @@ def show_completion_message():
         adsk.core.MessageBoxIconTypes.InformationIconType
     )
 
-def contour(doc, setup, cam):
+def contour(doc, setup, cam, config):
     """Create a 2D contour operation."""
     operations = setup.operations
     contour_input = operations.createInput('contour2d')
@@ -186,14 +229,12 @@ def contour(doc, setup, cam):
     params.itemByName('tool_numberOfFlutes').expression = '2'
 
     # Set machining parameters
-    params.itemByName('tool_spindleSpeed').expression = '16000 rpm'
-    params.itemByName('tool_feedPlunge').expression = '8.33 in/min'
-    params.itemByName('tool_coolant').expression = "'disabled'"
-
+    params.itemByName('tool_spindleSpeed').expression = config['SPINDLE_SPEED']
+    params.itemByName('tool_feedPlunge').expression = config['FEED_PLUNGE']
+    params.itemByName('tool_coolant').expression = config['COOLANT']
     
     # Bottom Height
-    # Note: 'bottomHeight_offset' usually works relative to the default 'Selected Contour'
-    params.itemByName('bottomHeight_offset').expression = '-0.01 in'
+    params.itemByName('bottomHeight_offset').expression = config['BOTTOM_HEIGHT']
     
     # Maximum Roughing Stepdown
     try:
@@ -205,7 +246,7 @@ def contour(doc, setup, cam):
         if params.itemByName('multipleDepthsEnabled'):
             params.itemByName('multipleDepthsEnabled').value.value = True
         
-        params.itemByName('maximumStepdown').expression = '0.05 in'
+        params.itemByName('maximumStepdown').expression = config['DEPTH_PASSES']
     except:
         app.log('Could not set multiple depths parameters completely.')
 
