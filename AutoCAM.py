@@ -172,7 +172,7 @@ def bore(doc, setup, cam, config):
                 if abs(cylinder.radius - circle['radius']) < 0.001:
                     hole_faces.append(face)
                     break
-    
+
     app.log(f"Found {len(hole_faces)} holes.")
 
     operations = setup.operations
@@ -201,29 +201,10 @@ def bore(doc, setup, cam, config):
     params.itemByName('bottomHeight_offset').expression = config['BOTTOM_HEIGHT']
     params.itemByName('strategy').expression = "'bore'"
 
+    params.itemByName('circularFaces').value.value = hole_faces
+
     cam.generateToolpath(boring_op)
     app.log("Toolpath generated!")
-    
-    # Show completion message with instructions for changing tool
-    show_completion_message()
-
-def show_completion_message():
-    """
-    Shows a single message when the operation is complete.
-    """
-    app = adsk.core.Application.get()
-    ui = app.userInterface
-    
-    ui.messageBox(
-        'Boring operation created!\n\n' +
-        'To change the tool:\n' +
-        '• Double-click the operation in the Browser\n' +
-        '• Click the "Tool" tab and select your tool\n' +
-        '• Click "Generate" to regenerate the toolpath',
-        'AutoCAM Complete',
-        adsk.core.MessageBoxButtonTypes.OKButtonType,
-        adsk.core.MessageBoxIconTypes.InformationIconType
-    )
 
 def contour(doc, setup, cam, config):
     """Create a 2D contour operation."""
