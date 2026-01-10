@@ -15,6 +15,8 @@ DEPTH_PASSES = 0.0
 SPINDLE_SPEED = ''
 FEED_PLUNGE = ''
 
+# TODO: select tool, select contour, select holes
+
 def run(_context: str):
     """This function is called by Fusion when the script is run."""
 
@@ -80,7 +82,7 @@ def run(_context: str):
 
         COOLANT = "'disabled'"
         BOTTOM_HEIGHT = '-0.01 in'
-        DEPTH_PASSES = f"{stock_z_height_cm / 5.0} in"
+        DEPTH_PASSES = f"{stock_z_height_cm / 5.0 * 0.393701} in"
         if material.lower() == "polycarb":
             SPINDLE_SPEED = '16000 rpm'
             FEED_PLUNGE = '8.33 in/min'
