@@ -1,0 +1,12 @@
+{
+	"autodeskProduct":	"Fusion",
+	"type":	"script",
+	"author":	"Tanmay Garg",
+	"description":	{
+		"":	"Automatically CAM"
+	},
+	"version":	"",
+	"supportedOS":	"windows|mac",
+	"editEnabled":	true,
+	"iconFilename":	"ScriptIcon.svg"
+}
