@@ -26,10 +26,10 @@ Fusion 360 looks for scripts in specific directories on your computer.
 
 ### 2. Install the Script
 1.  Navigate to the `Scripts` directory mentioned above.
-2.  Create a new folder named `AutoCAM-MVP` (if it doesn't already exist).
+2.  Create a new folder named `AutoCAM` (if it doesn't already exist).
 3.  Copy the following files into this folder:
-    *   `AutoCAM-MVP.py`
-    *   `AutoCAM-MVP.manifest`
+    *   `AutoCAM.py`
+    *   `AutoCAM.manifest`
     *   `ScriptIcon.svg`
 
 ### 3. Run the Script in Fusion 360
