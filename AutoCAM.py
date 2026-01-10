@@ -15,8 +15,6 @@ DEPTH_PASSES = 0.0
 SPINDLE_SPEED = ''
 FEED_PLUNGE = ''
 
-# TODO: select contour, select holes
-
 def run(_context: str):
     """This function is called by Fusion when the script is run."""
 
@@ -214,7 +212,6 @@ def contour(doc, setup, cam, config):
 
     params = contour_op.parameters
 
-
     tool = get_tool(cam)
     if tool:
         # Use the tool in your operation
@@ -227,6 +224,44 @@ def contour(doc, setup, cam, config):
         params.itemByName('tool_diameter').expression = '3.175 mm'
         params.itemByName('tool_type').expression = "'flat end mill'"
         params.itemByName('tool_numberOfFlutes').expression = '2'
+    
+    design = adsk.fusion.Design.cast(doc.products.itemByProductType('DesignProductType'))
+
+    if not design:
+        ui.messageBox('No active design found.')
+        return
+    
+    root = design.rootComponent
+    bottom_face = None
+    min_z = float('inf')
+
+    for body in root.bRepBodies:
+        for face in body.faces:
+            success, normal = face.evaluator.getNormalAtPoint(face.pointOnFace)
+            if success and normal.z < -0.9: 
+                z_value = face.pointOnFace.z
+                if z_value < min_z:
+                    min_z = z_value
+                    bottom_face = face
+    
+    if bottom_face:
+        outer_loop = None
+        for loop in bottom_face.loops:
+            if loop.isOuter:
+                outer_loop = loop
+                break
+        
+        if outer_loop:
+            edges_to_select = []
+            for i in range(outer_loop.edges.count):
+                edges_to_select.append(outer_loop.edges.item(i))
+            
+            geom_param = params.itemByName('contours')
+            cad_contours = adsk.cam.CadContours2dParameterValue.cast(geom_param.value)
+            selections = cad_contours.getCurveSelections()
+            chain = selections.createNewChainSelection()
+            chain.inputGeometry = edges_to_select 
+            cad_contours.applyCurveSelections(selections)
 
     # Set machining parameters
     params.itemByName('tool_spindleSpeed').expression = config['SPINDLE_SPEED']
@@ -237,19 +272,14 @@ def contour(doc, setup, cam, config):
     params.itemByName('bottomHeight_offset').expression = config['BOTTOM_HEIGHT']
     
     # Maximum Roughing Stepdown
-    try:
-        # Enable multiple depths
-        p_multiple_depths = params.itemByName('operation_strategy_multipleDepth')
-        if not p_multiple_depths:
-             p_multiple_depths = params.itemByName('multipleDepthsGroup') # Sometimes a group
-        
-        if params.itemByName('multipleDepthsEnabled'):
-            params.itemByName('multipleDepthsEnabled').value.value = True
-        
-        params.itemByName('maximumStepdown').expression = config['DEPTH_PASSES']
-    except:
-        app.log('Could not set multiple depths parameters completely.')
-
+    p_do_multiple = params.itemByName('doMultipleDepths')
+    if p_do_multiple:
+        p_do_multiple.value.value = True
+    
+    p_stepdown = params.itemByName('maximumStepdown')
+    if p_stepdown:
+        p_stepdown.expression = config['DEPTH_PASSES']
+    
     cam.generateToolpath(contour_op)
     app.log("Contour Toolpath generated!")
 
