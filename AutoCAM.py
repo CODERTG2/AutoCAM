@@ -15,7 +15,7 @@ DEPTH_PASSES = 0.0
 SPINDLE_SPEED = ''
 FEED_PLUNGE = ''
 
-# TODO: select tool, select contour, select holes
+# TODO: select contour, select holes
 
 def run(_context: str):
     """This function is called by Fusion when the script is run."""
@@ -181,10 +181,18 @@ def bore(doc, setup, cam, config):
     
     params = boring_op.parameters
 
-    # Set default tool parameters first
-    params.itemByName('tool_diameter').expression = '3.175 mm'
-    params.itemByName('tool_type').expression = "'flat end mill'"
-    params.itemByName('tool_numberOfFlutes').expression = '2'
+    tool = get_tool(cam)
+    if tool:
+        # Use the tool in your operation
+        boring_op.tool = tool
+        app.log("Tool assigned to operation!")
+    else:
+        app.log("Warning: Could not find the specific tool, using default parameters")
+
+        # Set default tool parameters first
+        params.itemByName('tool_diameter').expression = '3.175 mm'
+        params.itemByName('tool_type').expression = "'flat end mill'"
+        params.itemByName('tool_numberOfFlutes').expression = '2'
 
     # Set other machining parameters
     params.itemByName('tool_spindleSpeed').expression = config['SPINDLE_SPEED']
@@ -222,13 +230,22 @@ def contour(doc, setup, cam, config):
     operations = setup.operations
     contour_input = operations.createInput('contour2d')
     contour_op = operations.add(contour_input)
-    
+
     params = contour_op.parameters
 
-    # Set tool parameters (same as bore)
-    params.itemByName('tool_diameter').expression = '3.175 mm'
-    params.itemByName('tool_type').expression = "'flat end mill'"
-    params.itemByName('tool_numberOfFlutes').expression = '2'
+
+    tool = get_tool(cam)
+    if tool:
+        # Use the tool in your operation
+        contour_op.tool = tool
+        app.log("Tool assigned to operation!")
+    else:
+        app.log("Warning: Could not find the specific tool, using default parameters")
+
+        # Set tool parameters (same as bore)
+        params.itemByName('tool_diameter').expression = '3.175 mm'
+        params.itemByName('tool_type').expression = "'flat end mill'"
+        params.itemByName('tool_numberOfFlutes').expression = '2'
 
     # Set machining parameters
     params.itemByName('tool_spindleSpeed').expression = config['SPINDLE_SPEED']
@@ -254,3 +271,8 @@ def contour(doc, setup, cam, config):
 
     cam.generateToolpath(contour_op)
     app.log("Contour Toolpath generated!")
+
+def get_tool(cam):
+    toolLib: adsk.cam.DocumentToolLibrary = cam.documentToolLibrary
+    # assuming that there is only 1 tool in the library
+    return toolLib.item(0)
