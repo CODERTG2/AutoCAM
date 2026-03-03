@@ -78,9 +78,12 @@ def run(_context: str):
         (material, cancelled) = ui.inputBox("Is this polycarb or aluminum?", "Material", "polycarb")
         if cancelled: return
 
+        (passes, cancelled) = ui.inputBox("How many passes?", "Passes", "4")
+        if cancelled: return
+
         COOLANT = "'disabled'"
         BOTTOM_HEIGHT = '-0.01 in'
-        DEPTH_PASSES = f"{stock_z_height_cm / 5.0 * 0.393701} in"
+        DEPTH_PASSES = f"{stock_z_height_cm / int(passes) * 0.393701} in"
         if material.lower() == "polycarb":
             SPINDLE_SPEED = '16000 rpm'
             FEED_PLUNGE = '8.33 in/min'
