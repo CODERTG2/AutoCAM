@@ -220,7 +220,7 @@ def bore(doc, setup, cam, config):
     app.log("Toolpath generated!")
 
 def pocket(doc, setup, cam, config):
-    """Create a 2D pocket operation for internal pockets."""
+    """Create a 2D pocket operation for non-circular through-features."""
     design = adsk.fusion.Design.cast(doc.products.itemByProductType('DesignProductType'))
     if not design:
         ui.messageBox('No active design found.')
@@ -228,53 +228,77 @@ def pocket(doc, setup, cam, config):
 
     root = design.rootComponent
 
-    # Find all downward-facing planar faces
-    all_down_faces = []
+    # Find the bottom face (largest downward-facing planar face)
+    bottom_face = None
+    max_area = 0
     for body in root.bRepBodies:
         for face in body.faces:
             if face.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType:
                 success, normal = face.evaluator.getNormalAtPoint(face.pointOnFace)
-                if success and normal.z < -0.9:
-                    all_down_faces.append(face)
+                if success and normal.z < -0.9 and face.area > max_area:
+                    max_area = face.area
+                    bottom_face = face
 
-    if not all_down_faces:
-        app.log("No downward-facing faces found, skipping pocket.")
+    if not bottom_face:
+        app.log("No bottom face found, skipping pocket.")
         return
 
-    # Sort by area descending — largest is the part bottom, the rest are pocket bottoms
-    all_down_faces.sort(key=lambda f: f.area, reverse=True)
-    pocket_faces = all_down_faces[1:]  # Everything except the largest (part bottom)
+    # Find non-circular inner loops on the bottom face
+    # Inner loops = holes/cutouts; circular ones are handled by bore
+    pocket_loops = []
+    for loop in bottom_face.loops:
+        if loop.isOuter:
+            continue  # Skip the outer boundary (handled by contour)
 
-    if not pocket_faces:
-        app.log("No pocket faces found, skipping pocket.")
+        # Check if this loop is purely circular (handled by bore)
+        edges = loop.edges
+        is_circle = False
+        if edges.count <= 2:
+            all_arcs = True
+            for edge in edges:
+                ct = edge.geometry.curveType
+                if ct != adsk.core.Curve3DTypes.Circle3DCurveType and ct != adsk.core.Curve3DTypes.Arc3DCurveType:
+                    all_arcs = False
+                    break
+            is_circle = all_arcs
+
+        if not is_circle:
+            pocket_loops.append(loop)
+
+    if not pocket_loops:
+        app.log("No non-circular pocket features found, skipping pocket.")
         return
 
-    app.log(f"Found {len(pocket_faces)} pocket face(s).")
+    app.log(f"Found {len(pocket_loops)} non-circular pocket loop(s).")
 
-    # Create pocket operation
+    # Create 2D contour operation for non-circular through-features
     operations = setup.operations
-    pocket_input = operations.createInput('pocket2d')
-    pocket_op = operations.add(pocket_input)
+    contour_input = operations.createInput('contour2d')
+    contour_op = operations.add(contour_input)
 
-    params = pocket_op.parameters
+    params = contour_op.parameters
 
     # Assign tool
     tool = get_tool(cam)
     if tool:
-        pocket_op.tool = tool
-        app.log("Tool assigned to pocket operation!")
+        contour_op.tool = tool
+        app.log("Tool assigned to pocket contour operation!")
     else:
         app.log("Warning: Could not find the specific tool, using default parameters")
         params.itemByName('tool_diameter').expression = '3.175 mm'
         params.itemByName('tool_type').expression = "'flat end mill'"
         params.itemByName('tool_numberOfFlutes').expression = '2'
 
-    # Set pocket geometry using PocketSelection
-    pocket_param = params.itemByName('pockets')
-    cad_contours = adsk.cam.CadContours2dParameterValue.cast(pocket_param.value)
+    # Set contour geometry — chain selections for each non-circular loop
+    geom_param = params.itemByName('contours')
+    cad_contours = adsk.cam.CadContours2dParameterValue.cast(geom_param.value)
     selections = cad_contours.getCurveSelections()
-    pocket_sel = selections.createNewPocketSelection()
-    pocket_sel.inputGeometry = pocket_faces
+
+    for loop in pocket_loops:
+        chain_sel = selections.createNewChainSelection()
+        edge_list = [edge for edge in loop.edges]
+        chain_sel.inputGeometry = edge_list
+
     cad_contours.applyCurveSelections(selections)
 
     # Set machining parameters
@@ -292,8 +316,8 @@ def pocket(doc, setup, cam, config):
     if p_stepdown:
         p_stepdown.expression = config['DEPTH_PASSES']
 
-    cam.generateToolpath(pocket_op)
-    app.log("Pocket Toolpath generated!")
+    cam.generateToolpath(contour_op)
+    app.log("Pocket Contour Toolpath generated!")
 
 def contour(doc, setup, cam, config):
     """Create a 2D contour operation for the outer profile."""
