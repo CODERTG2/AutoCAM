@@ -115,6 +115,18 @@ def run(_context: str):
             app.log("Manual NC Stop created successfully!")
         else:
             app.log("Error: 'manualType' parameter not found.")
+
+        pocket(doc, newSetup, cam, config)
+
+        app.log(f"Pocket created!")
+
+        # Second Manual NC Stop (between pocket and contour)
+        manual_nc_input2 = newSetup.operations.createInput('manual')
+        manual_nc_op2 = newSetup.operations.add(manual_nc_input2)
+        param2 = manual_nc_op2.parameters.itemByName('manualType')
+        if param2:
+            param2.expression = "'stop'"
+            app.log("Manual NC Stop 2 created successfully!")
         
         contour(doc, newSetup, cam, config)
 
@@ -207,8 +219,84 @@ def bore(doc, setup, cam, config):
     cam.generateToolpath(boring_op)
     app.log("Toolpath generated!")
 
+def pocket(doc, setup, cam, config):
+    """Create a 2D pocket operation for internal pockets."""
+    design = adsk.fusion.Design.cast(doc.products.itemByProductType('DesignProductType'))
+    if not design:
+        ui.messageBox('No active design found.')
+        return
+
+    root = design.rootComponent
+
+    # Find all downward-facing planar faces
+    all_down_faces = []
+    for body in root.bRepBodies:
+        for face in body.faces:
+            if face.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType:
+                success, normal = face.evaluator.getNormalAtPoint(face.pointOnFace)
+                if success and normal.z < -0.9:
+                    all_down_faces.append(face)
+
+    if not all_down_faces:
+        app.log("No downward-facing faces found, skipping pocket.")
+        return
+
+    # Sort by area descending — largest is the part bottom, the rest are pocket bottoms
+    all_down_faces.sort(key=lambda f: f.area, reverse=True)
+    pocket_faces = all_down_faces[1:]  # Everything except the largest (part bottom)
+
+    if not pocket_faces:
+        app.log("No pocket faces found, skipping pocket.")
+        return
+
+    app.log(f"Found {len(pocket_faces)} pocket face(s).")
+
+    # Create pocket operation
+    operations = setup.operations
+    pocket_input = operations.createInput('pocket2d')
+    pocket_op = operations.add(pocket_input)
+
+    params = pocket_op.parameters
+
+    # Assign tool
+    tool = get_tool(cam)
+    if tool:
+        pocket_op.tool = tool
+        app.log("Tool assigned to pocket operation!")
+    else:
+        app.log("Warning: Could not find the specific tool, using default parameters")
+        params.itemByName('tool_diameter').expression = '3.175 mm'
+        params.itemByName('tool_type').expression = "'flat end mill'"
+        params.itemByName('tool_numberOfFlutes').expression = '2'
+
+    # Set pocket geometry using PocketSelection
+    pocket_param = params.itemByName('pockets')
+    cad_contours = adsk.cam.CadContours2dParameterValue.cast(pocket_param.value)
+    selections = cad_contours.getCurveSelections()
+    pocket_sel = selections.createNewPocketSelection()
+    pocket_sel.inputGeometry = pocket_faces
+    cad_contours.applyCurveSelections(selections)
+
+    # Set machining parameters
+    params.itemByName('tool_spindleSpeed').expression = config['SPINDLE_SPEED']
+    params.itemByName('tool_feedPlunge').expression = config['FEED_PLUNGE']
+    params.itemByName('tool_coolant').expression = config['COOLANT']
+    params.itemByName('bottomHeight_offset').expression = config['BOTTOM_HEIGHT']
+
+    # Multiple depths
+    p_do_multiple = params.itemByName('doMultipleDepths')
+    if p_do_multiple:
+        p_do_multiple.value.value = True
+
+    p_stepdown = params.itemByName('maximumStepdown')
+    if p_stepdown:
+        p_stepdown.expression = config['DEPTH_PASSES']
+
+    cam.generateToolpath(pocket_op)
+    app.log("Pocket Toolpath generated!")
+
 def contour(doc, setup, cam, config):
-    """Create a 2D contour operation."""
+    """Create a 2D contour operation for the outer profile."""
     operations = setup.operations
     contour_input = operations.createInput('contour2d')
     contour_op = operations.add(contour_input)
@@ -217,72 +305,69 @@ def contour(doc, setup, cam, config):
 
     tool = get_tool(cam)
     if tool:
-        # Use the tool in your operation
         contour_op.tool = tool
-        app.log("Tool assigned to operation!")
+        app.log("Tool assigned to contour operation!")
     else:
         app.log("Warning: Could not find the specific tool, using default parameters")
-
-        # Set tool parameters (same as bore)
         params.itemByName('tool_diameter').expression = '3.175 mm'
         params.itemByName('tool_type').expression = "'flat end mill'"
         params.itemByName('tool_numberOfFlutes').expression = '2'
-    
-    design = adsk.fusion.Design.cast(doc.products.itemByProductType('DesignProductType'))
 
+    design = adsk.fusion.Design.cast(doc.products.itemByProductType('DesignProductType'))
     if not design:
         ui.messageBox('No active design found.')
         return
-    
+
     root = design.rootComponent
+
+    # Find the bottom face using LARGEST AREA (not min Z)
+    # This ensures pockets don't interfere — pocket floors are smaller
     bottom_face = None
-    min_z = float('inf')
+    max_area = 0
 
     for body in root.bRepBodies:
         for face in body.faces:
-            success, normal = face.evaluator.getNormalAtPoint(face.pointOnFace)
-            if success and normal.z < -0.9: 
-                z_value = face.pointOnFace.z
-                if z_value < min_z:
-                    min_z = z_value
-                    bottom_face = face
-    
+            if face.geometry.surfaceType == adsk.core.SurfaceTypes.PlaneSurfaceType:
+                success, normal = face.evaluator.getNormalAtPoint(face.pointOnFace)
+                if success and normal.z < -0.9:
+                    if face.area > max_area:
+                        max_area = face.area
+                        bottom_face = face
+
     if bottom_face:
-        outer_loop = None
-        for loop in bottom_face.loops:
-            if loop.isOuter:
-                outer_loop = loop
-                break
-        
-        if outer_loop:
-            edges_to_select = []
-            for i in range(outer_loop.edges.count):
-                edges_to_select.append(outer_loop.edges.item(i))
-            
-            geom_param = params.itemByName('contours')
-            cad_contours = adsk.cam.CadContours2dParameterValue.cast(geom_param.value)
-            selections = cad_contours.getCurveSelections()
-            chain = selections.createNewChainSelection()
-            chain.inputGeometry = edges_to_select 
-            cad_contours.applyCurveSelections(selections)
+        # Use FaceContourSelection instead of ChainSelection
+        # This is simpler and more robust — no manual edge gathering needed
+        geom_param = params.itemByName('contours')
+        cad_contours = adsk.cam.CadContours2dParameterValue.cast(geom_param.value)
+        selections = cad_contours.getCurveSelections()
+
+        face_sel = selections.createNewFaceContourSelection()
+        face_sel.inputGeometry = [bottom_face]
+        face_sel.loopType = adsk.cam.LoopTypes.OnlyOutsideLoops
+        face_sel.sideType = adsk.cam.SideTypes.AlwaysOutsideSideType
+
+        cad_contours.applyCurveSelections(selections)
+        app.log(f"Bottom face selected for contour (area: {bottom_face.area:.4f})")
+    else:
+        app.log("Warning: No bottom face found for contour!")
 
     # Set machining parameters
     params.itemByName('tool_spindleSpeed').expression = config['SPINDLE_SPEED']
     params.itemByName('tool_feedPlunge').expression = config['FEED_PLUNGE']
     params.itemByName('tool_coolant').expression = config['COOLANT']
-    
+
     # Bottom Height
     params.itemByName('bottomHeight_offset').expression = config['BOTTOM_HEIGHT']
-    
+
     # Maximum Roughing Stepdown
     p_do_multiple = params.itemByName('doMultipleDepths')
     if p_do_multiple:
         p_do_multiple.value.value = True
-    
+
     p_stepdown = params.itemByName('maximumStepdown')
     if p_stepdown:
         p_stepdown.expression = config['DEPTH_PASSES']
-    
+
     cam.generateToolpath(contour_op)
     app.log("Contour Toolpath generated!")
 
